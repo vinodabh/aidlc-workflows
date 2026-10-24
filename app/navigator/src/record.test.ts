@@ -1,6 +1,7 @@
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
-import { pickNextAction, readProject, type Snapshot } from "./record";
+import { pickNextAction, readProject, readProjectWithSavedChoice, type Snapshot } from "./record";
 
 const fixtures = join(import.meta.dir, "../fixtures");
 
@@ -49,6 +50,42 @@ describe("readProject", () => {
       file: "aidlc/spaces/default/intents/261024-blank/ideation/feasibility/scope-questions.md",
       questionId: "Q2",
     });
+  });
+
+  test("lists markdown for the current stage only", () => {
+    const snapshot = opened("blank-answer");
+    expect(snapshot.intent.documents.map((doc) => doc.name)).toEqual(["notes.md", "scope-questions.md"]);
+    expect(opened("checkboxes").intent.documents).toEqual([]);
+    expect(opened("idle").intent.documents).toEqual([]);
+  });
+
+  test("opens a chosen intent without writing a cursor", () => {
+    const root = join(fixtures, "several-intents");
+    const spaceCursor = join(root, "aidlc", "active-space");
+    const intentCursor = join(root, "aidlc", "spaces", "default", "intents", "active-intent");
+    expect(existsSync(spaceCursor)).toBe(false);
+    const snapshot = readProject(root, { space: "default", dirName: "261024-one" });
+    expect(snapshot.kind).toBe("intent");
+    if (snapshot.kind === "intent") expect(snapshot.intent.slug).toBe("one");
+    expect(existsSync(spaceCursor)).toBe(false);
+    expect(existsSync(intentCursor)).toBe(false);
+    expect(readProject(root, { space: "..", dirName: "261024-one" }).kind).toBe("choose-intent");
+  });
+
+  test("uses a saved pick only while the cursors are missing and the work is still open", () => {
+    const several = join(fixtures, "several-intents");
+    const picked = readProjectWithSavedChoice(several, { space: "default", dirName: "261024-one" });
+    expect(picked.kind).toBe("intent");
+    if (picked.kind === "intent") expect(picked.intent.slug).toBe("one");
+    expect(readProjectWithSavedChoice(several, { space: "default", dirName: "261024-done" }).kind).toBe("choose-intent");
+
+    const rooted = join(fixtures, "cursor-selects");
+    const cursorPath = join(rooted, "aidlc", "spaces", "default", "intents", "active-intent");
+    const before = readFileSync(cursorPath, "utf8");
+    const followed = readProjectWithSavedChoice(rooted, { space: "default", dirName: "261024-one" });
+    expect(followed.kind).toBe("intent");
+    if (followed.kind === "intent") expect(followed.intent.slug).toBe("two");
+    expect(readFileSync(cursorPath, "utf8")).toBe(before);
   });
 
   test("asks for approval when the current stage is waiting and answers are filled", () => {

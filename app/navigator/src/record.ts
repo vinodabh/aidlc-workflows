@@ -17,6 +17,17 @@ export interface BlankAnswer {
   line: number;
 }
 
+export interface StageDocument {
+  /** Project-relative path, with `/` separators. */
+  file: string;
+  name: string;
+}
+
+export interface IntentSelection {
+  space: string;
+  dirName: string;
+}
+
 export interface IntentChoice {
   space: string;
   dirName: string;
@@ -34,6 +45,7 @@ export interface IntentView {
   status: string | null;
   stages: StageLine[];
   blankAnswers: BlankAnswer[];
+  documents: StageDocument[];
 }
 
 export type NextAction =
@@ -96,11 +108,16 @@ export function parseStageLines(content: string): StageLine[] {
   return stages;
 }
 
-export function readProject(projectRoot: string): Snapshot {
+export function readProject(projectRoot: string, selection?: IntentSelection | null): Snapshot {
   const workspace = join(projectRoot, workspaceName);
   if (!isDir(workspace)) return { kind: "missing-record" };
 
   const spaces = listSpaces(workspace);
+  if (selection) {
+    const picked = openSelection(projectRoot, workspace, spaces, selection);
+    if (picked) return picked;
+  }
+
   const spaceName = readCursor(join(workspace, "active-space"));
   const space = spaceName && spaces.includes(spaceName) ? spaceName : null;
   if (!space) {
@@ -113,18 +130,16 @@ export function readProject(projectRoot: string): Snapshot {
     return { kind: "choose-intent", choices: openChoices(workspace, [space]) };
   }
 
-  const intent = readIntent(projectRoot, workspace, space, cursor);
-  const current = intent.stages.find((stage) => stage.slug === intent.currentStage) ?? null;
-  return {
-    kind: "intent",
-    intent,
-    nextAction: pickNextAction({
-      blankAnswers: intent.blankAnswers,
-      currentStage: current && intent.currentStage
-        ? { slug: intent.currentStage, mark: current.mark }
-        : null,
-    }),
-  };
+  return intentSnapshot(projectRoot, workspace, space, cursor);
+}
+
+/** A saved pick applies only when the cursors are missing and that work is still open. */
+export function readProjectWithSavedChoice(projectRoot: string, saved: IntentSelection | null): Snapshot {
+  const snapshot = readProject(projectRoot);
+  if (snapshot.kind !== "choose-intent" || !saved) return snapshot;
+  const match = snapshot.choices.some((choice) => choice.space === saved.space && choice.dirName === saved.dirName);
+  if (!match) return snapshot;
+  return readProject(projectRoot, saved);
 }
 
 function readIntent(projectRoot: string, workspace: string, space: string, dirName: string): IntentView {
@@ -149,6 +164,38 @@ function readIntent(projectRoot: string, workspace: string, space: string, dirNa
     blankAnswers: phaseDir && stageDir
       ? blankAnswersUnder(projectRoot, join(record, phaseDir, stageDir))
       : [],
+    documents: phaseDir && stageDir
+      ? markdownUnder(projectRoot, join(record, phaseDir, stageDir))
+      : [],
+  };
+}
+
+function openSelection(
+  projectRoot: string,
+  workspace: string,
+  spaces: readonly string[],
+  selection: IntentSelection,
+): Snapshot | null {
+  const space = segment(selection.space);
+  const dirName = segment(selection.dirName);
+  if (!space || !dirName || !spaces.includes(space)) return null;
+  const record = join(workspace, "spaces", space, "intents", dirName);
+  if (readText(join(record, `${workspaceName}-state.md`)) === null) return null;
+  return intentSnapshot(projectRoot, workspace, space, dirName);
+}
+
+function intentSnapshot(projectRoot: string, workspace: string, space: string, dirName: string): Snapshot {
+  const intent = readIntent(projectRoot, workspace, space, dirName);
+  const current = intent.stages.find((stage) => stage.slug === intent.currentStage) ?? null;
+  return {
+    kind: "intent",
+    intent,
+    nextAction: pickNextAction({
+      blankAnswers: intent.blankAnswers,
+      currentStage: current && intent.currentStage
+        ? { slug: intent.currentStage, mark: current.mark }
+        : null,
+    }),
   };
 }
 
@@ -195,6 +242,32 @@ function blankAnswersUnder(projectRoot: string, stageDir: string): BlankAnswer[]
   }
   found.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
   return found;
+}
+
+function markdownUnder(projectRoot: string, stageDir: string): StageDocument[] {
+  const docs: StageDocument[] = [];
+  const walk = (dir: string) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.name.startsWith(".")) continue;
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (entry.isFile() && entry.name.endsWith(".md")) {
+        docs.push({
+          file: relative(projectRoot, path).split(sep).join("/"),
+          name: entry.name,
+        });
+      }
+    }
+  };
+  walk(stageDir);
+  docs.sort((a, b) => a.file.localeCompare(b.file));
+  return docs;
 }
 
 function questionFiles(dir: string): string[] {

@@ -6,6 +6,15 @@
   "description": "Electron window for an AI-DLC workflow on Windows, macOS, and Linux.",
   "license": "MIT-0",
   "scripts": {
-    "test": "bun test"
+    "test": "bun test",
+    "build": "bun scripts/build.ts",
+    "start": "bun scripts/build.ts && electron dist/main.js"
+  },
+  "dependencies": {
+    "electron": "^45.0.0",
+    "markdown-it": "^15.0.3"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "^14.2.0"
   }
 }
