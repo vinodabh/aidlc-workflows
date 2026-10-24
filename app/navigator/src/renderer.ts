@@ -1,8 +1,9 @@
-import type { NavApi, OpenResult } from "./api";
+import type { NavApi, OpenResult, SettingsView } from "./api";
 import { renderMarkdown } from "./markdown";
+import type { ThemeChoice } from "./preferences";
 import type { Snapshot } from "./record";
 import { actionDraftKey, retainDraft } from "./session";
-import { present } from "./view";
+import { commandMessage, present } from "./view";
 
 declare global {
   interface Window {
@@ -22,7 +23,12 @@ const openButton = document.createElement("button");
 openButton.type = "button";
 openButton.id = "open-folder";
 openButton.textContent = "Open folder";
-header.append(title, openButton);
+const settingsButton = document.createElement("button");
+settingsButton.type = "button";
+settingsButton.id = "open-settings";
+settingsButton.className = "push";
+settingsButton.textContent = "Settings";
+header.append(title, openButton, settingsButton);
 
 const layout = document.createElement("div");
 layout.className = "layout";
@@ -74,7 +80,81 @@ copyButton.textContent = "Copy path";
 actions.append(nextButton, copyButton);
 content.append(markdownPane, draftWrap, actions);
 layout.append(sidebar, content);
-appRoot.append(header, layout);
+
+const settingsPanel = document.createElement("section");
+settingsPanel.className = "settings";
+settingsPanel.hidden = true;
+const settingsTitle = document.createElement("h2");
+settingsTitle.className = "settings-title";
+settingsTitle.textContent = "Settings";
+const appearance = document.createElement("fieldset");
+const appearanceLegend = document.createElement("legend");
+appearanceLegend.textContent = "Appearance";
+appearance.append(appearanceLegend);
+const themeInputs = new Map<ThemeChoice, HTMLInputElement>();
+for (const choice of [
+  ["system", "System"],
+  ["light", "Light"],
+  ["dark", "Dark"],
+] as const) {
+  const label = document.createElement("label");
+  const input = document.createElement("input");
+  input.type = "radio";
+  input.name = "theme";
+  input.value = choice[0];
+  if (choice[0] === "system") input.checked = true;
+  themeInputs.set(choice[0], input);
+  label.append(input, document.createTextNode(choice[1]));
+  appearance.append(label);
+  input.addEventListener("change", () => {
+    if (input.checked) void persist({ theme: choice[0] });
+  });
+}
+const commandField = document.createElement("fieldset");
+const commandLegend = document.createElement("legend");
+commandLegend.textContent = "Workflow command";
+const commandHint = document.createElement("p");
+commandHint.textContent = "Leave this empty to look the command up. Paste a path when that lookup is wrong.";
+const commandInput = document.createElement("input");
+commandInput.type = "text";
+commandInput.spellcheck = false;
+commandInput.autocomplete = "off";
+const commandStatus = document.createElement("p");
+commandStatus.className = "command-status";
+commandField.append(commandLegend, commandHint, commandInput, commandStatus);
+const backButton = document.createElement("button");
+backButton.type = "button";
+backButton.textContent = "Back";
+settingsPanel.append(settingsTitle, appearance, commandField, backButton);
+appRoot.append(header, layout, settingsPanel);
+
+let currentSettings: SettingsView | null = null;
+
+function paintSettings(view: SettingsView): void {
+  currentSettings = view;
+  document.documentElement.dataset.theme = view.theme;
+  for (const [value, input] of themeInputs) input.checked = value === view.theme;
+  if (document.activeElement !== commandInput) commandInput.value = view.commandPath;
+  commandStatus.textContent = commandMessage(view.commandPath, view.resolvedPath);
+}
+
+async function persist(patch: { theme?: ThemeChoice; commandPath?: string }): Promise<void> {
+  const theme = patch.theme ?? currentSettings?.theme ?? "system";
+  const commandPath = patch.commandPath ?? commandInput.value;
+  paintSettings(await nav.saveSettings({ theme, commandPath }));
+}
+
+settingsButton.addEventListener("click", () => {
+  settingsPanel.hidden = false;
+  layout.hidden = true;
+});
+backButton.addEventListener("click", () => {
+  settingsPanel.hidden = true;
+  layout.hidden = false;
+});
+commandInput.addEventListener("change", () => {
+  void persist({ commandPath: commandInput.value });
+});
 
 let snapshot: Snapshot | null = null;
 let openFile: string | null = null;
@@ -208,4 +288,8 @@ async function paint(next: Snapshot | null): Promise<void> {
   if (!text) markdownPane.textContent = "The document could not be read.";
 }
 
-void paint(await nav.snapshot()).then(() => loadRecents());
+void nav.settings().then(async (view) => {
+  if (view) paintSettings(view);
+  await paint(await nav.snapshot());
+  await loadRecents();
+});

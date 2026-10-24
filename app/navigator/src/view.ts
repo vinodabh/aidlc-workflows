@@ -45,6 +45,12 @@ export function nextActionLabel(action: NextAction): string {
   }
 }
 
+export function commandMessage(override: string, resolved: string | null): string {
+  if (override.trim() && !resolved) return "That command path is not available.";
+  if (!resolved) return "No workflow command was found.";
+  return resolved;
+}
+
 export function draftCaption(action: NextAction): string | null {
   if (action.kind === "answer") return `Answer ${action.questionId}`;
   if (action.kind === "approve") return "Comments";

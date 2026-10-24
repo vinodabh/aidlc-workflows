@@ -1,19 +1,26 @@
-import { mkdirSync, readFileSync, realpathSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
+import { homedir, platform } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, clipboard, dialog, ipcMain, type IpcMainInvokeEvent, type WebContents } from "electron";
-import type { OpenResult } from "./api";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, screen, type IpcMainInvokeEvent, type WebContents } from "electron";
+import type { OpenResult, SettingsInput, SettingsView } from "./api";
 import {
+  commandOverride,
   emptyPreferences,
   liveRecents,
   parsePreferences,
   rememberProject,
+  themeChoice,
   type Preferences,
   type RecentProject,
+  type ThemeChoice,
+  type WindowBounds,
 } from "./preferences";
 import { readProjectWithSavedChoice, type IntentSelection, type Snapshot } from "./record";
+import { resolveWorkflowCommand } from "./resolve-command";
 import { REFRESH_WAIT_MS, createRefreshGate } from "./session";
 import { containedMarkdown, contentSecurityPolicy, windowSecurity } from "./security";
+import { themes } from "./theme";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const workspaceName = "aidlc";
@@ -135,13 +142,59 @@ function harden(contents: WebContents): void {
   });
 }
 
+function hostPlatform(): "win32" | "linux" | "darwin" {
+  const name = platform();
+  if (name === "win32" || name === "darwin") return name;
+  return "linux";
+}
+
+function resolvedCommand(override: string): string | null {
+  return resolveWorkflowCommand({
+    env: process.env,
+    home: homedir(),
+    platform: hostPlatform(),
+    exists: (path) => {
+      try {
+        return existsSync(path);
+      } catch {
+        return false;
+      }
+    },
+  }, override).path;
+}
+
+function settingsView(): SettingsView {
+  const prefs = loadPrefs();
+  return { theme: prefs.theme, commandPath: prefs.commandPath, resolvedPath: resolvedCommand(prefs.commandPath) };
+}
+
+function windowColor(theme: ThemeChoice): string {
+  const dark = theme === "dark" || (theme === "system" && nativeTheme.shouldUseDarkColors);
+  return dark ? themes.dark.bg : themes.light.bg;
+}
+
+function boundsVisible(bounds: WindowBounds): boolean {
+  if (bounds.width < 720 || bounds.height < 480) return false;
+  return screen.getAllDisplays().some((display) => {
+    const area = display.workArea;
+    return bounds.x + bounds.width > area.x
+      && bounds.x < area.x + area.width
+      && bounds.y + bounds.height > area.y
+      && bounds.y < area.y + area.height;
+  });
+}
+
 function createWindow(): void {
+  const prefs = loadPrefs();
+  const saved = prefs.windowBounds && boundsVisible(prefs.windowBounds) ? prefs.windowBounds : null;
   window = new BrowserWindow({
-    width: 1100,
-    height: 760,
+    width: saved?.width ?? 1100,
+    height: saved?.height ?? 760,
+    x: saved?.x,
+    y: saved?.y,
     minWidth: 720,
     minHeight: 480,
-    backgroundColor: "#f6f4ef",
+    backgroundColor: windowColor(prefs.theme),
     show: true,
     webPreferences: {
       preload: join(here, "preload.cjs"),
@@ -151,7 +204,17 @@ function createWindow(): void {
     },
   });
   harden(window.webContents);
+  const boundsGate = createRefreshGate(REFRESH_WAIT_MS, () => {
+    if (!window || window.isDestroyed()) return;
+    const next = loadPrefs();
+    const box = window.getBounds();
+    next.windowBounds = { x: box.x, y: box.y, width: box.width, height: box.height };
+    storePrefs(next);
+  });
+  window.on("resize", () => boundsGate.poke());
+  window.on("move", () => boundsGate.poke());
   window.on("closed", () => {
+    boundsGate.cancel();
     window = null;
   });
   void window.loadFile(join(here, "index.html"));
@@ -211,6 +274,18 @@ function installIpc(): void {
     if (!abs) return false;
     clipboard.writeText(abs);
     return true;
+  });
+
+  ipcMain.handle("nav:settings", (event): SettingsView | null => (fromWindow(event) ? settingsView() : null));
+
+  ipcMain.handle("nav:save-settings", (event, input: unknown): SettingsView => {
+    if (!fromWindow(event) || !input || typeof input !== "object") return settingsView();
+    const body = input as Partial<SettingsInput>;
+    const prefs = loadPrefs();
+    prefs.theme = themeChoice(body.theme);
+    prefs.commandPath = commandOverride(body.commandPath);
+    storePrefs(prefs);
+    return settingsView();
   });
 }
 

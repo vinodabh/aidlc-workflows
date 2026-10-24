@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { liveRecents, parsePreferences, rememberProject } from "./preferences";
+import { emptyPreferences, liveRecents, parsePreferences, rememberProject } from "./preferences";
 
 describe("preferences", () => {
   test("keeps the eight most recent folders, newest first", () => {
@@ -29,6 +29,19 @@ describe("preferences", () => {
     expect(liveRecents(parsed.recentProjects, (path) => path === "/keep")).toEqual([
       { path: "/keep", openedAt: "t" },
     ]);
-    expect(parsePreferences("{")).toEqual({ recentProjects: [], chosenIntent: {} });
+    expect(parsePreferences("{")).toEqual(emptyPreferences());
+  });
+
+  test("keeps appearance, the command path, and window bounds", () => {
+    const parsed = parsePreferences(JSON.stringify({
+      theme: "dark",
+      commandPath: "/custom/tool",
+      windowBounds: { x: 10, y: 20, width: 1100, height: 760 },
+    }));
+    expect(parsed.theme).toBe("dark");
+    expect(parsed.commandPath).toBe("/custom/tool");
+    expect(parsed.windowBounds).toEqual({ x: 10, y: 20, width: 1100, height: 760 });
+    expect(parsePreferences(JSON.stringify({ theme: "blue", windowBounds: { x: 1 } })).theme).toBe("system");
+    expect(emptyPreferences().theme).toBe("system");
   });
 });

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
-import type { NavApi } from "./api";
+import type { NavApi, SettingsInput } from "./api";
 import type { IntentSelection, Snapshot } from "./record";
 
 const api: NavApi = {
@@ -10,6 +10,8 @@ const api: NavApi = {
   recents: () => ipcRenderer.invoke("nav:recents"),
   readDocument: (file: string) => ipcRenderer.invoke("nav:read-document", file),
   copyPath: (file: string) => ipcRenderer.invoke("nav:copy-path", file),
+  settings: () => ipcRenderer.invoke("nav:settings"),
+  saveSettings: (input: SettingsInput) => ipcRenderer.invoke("nav:save-settings", input),
   onRefresh: (listener: (snapshot: Snapshot) => void) => {
     const wrapped = (_event: IpcRendererEvent, snapshot: Snapshot) => listener(snapshot);
     ipcRenderer.on("nav:refreshed", wrapped);
