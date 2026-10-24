@@ -1,0 +1,11 @@
+{
+  "name": "navigator",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Electron window for an AI-DLC workflow on Windows, macOS, and Linux.",
+  "license": "MIT-0",
+  "scripts": {
+    "test": "bun test"
+  }
+}
