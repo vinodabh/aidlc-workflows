@@ -1,0 +1,26 @@
+[
+  {
+    "uuid": "0199a0a0-0000-7000-8000-000000000001",
+    "slug": "one",
+    "dirName": "261024-one",
+    "status": "in-flight"
+  },
+  {
+    "uuid": "0199a0a0-0000-7000-8000-000000000002",
+    "slug": "two",
+    "dirName": "261024-two",
+    "status": "in-flight"
+  },
+  {
+    "uuid": "0199a0a0-0000-7000-8000-000000000003",
+    "slug": "done",
+    "dirName": "261024-done",
+    "status": "complete"
+  },
+  {
+    "uuid": "0199a0a0-0000-7000-8000-000000000004",
+    "slug": "retired",
+    "dirName": "261024-retired",
+    "status": "archived"
+  }
+]
